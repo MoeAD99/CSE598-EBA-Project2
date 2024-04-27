@@ -3,19 +3,21 @@ package main // Package main, Do not change this line.
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 	"time"
+
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // Product represents the structure for a product entity
 type Product struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Owner     string `json:"owner"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-	Category  string `json:"category"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Status      string `json:"status"`
+	Owner       string `json:"owner"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+	Description string `json:"description"`
+	Category    string `json:"category"`
 }
 
 // SupplyChainContract defines the smart contract structure
@@ -42,6 +44,7 @@ func (s *SupplyChainContract) InitLedger(ctx contractapi.TransactionContextInter
 	// Initial set of products to populate the ledger
 	products := []Product{
 		{ID: "p1", Name: "Laptop", Status: "Manufactured", Owner: "CompanyA", CreatedAt: timestamp, UpdatedAt: timestamp, Description: "High-end gaming laptop", Category: "Electronics"},
+		{ID: "p2", Name: "Smartphone", Status: "Manufactured", Owner: "CompanyB", CreatedAt: timestamp, UpdatedAt: timestamp, Description: "Latest model smartphone", Category: "Electronics"},
 	}
 
 	for _, product := range products {
@@ -56,11 +59,55 @@ func (s *SupplyChainContract) InitLedger(ctx contractapi.TransactionContextInter
 // CreateProduct creates a new product in the ledger
 func (s *SupplyChainContract) CreateProduct(ctx contractapi.TransactionContextInterface, id, name, owner, description, category string) error {
 	// Write your implementation here
+	exists, err := s.ProductExists(ctx, id)
+	if exists == true {
+		return fmt.Errorf("Product already exists")
+	}
+
+	timestamp, err := s.getTimestamp(ctx)
+	if err != nil {
+		return err
+	}
+
+	product := Product{ID: id, Name: name, Status: "Manufactured", Owner: owner, CreatedAt: timestamp, UpdatedAt: timestamp, Category: category}
+
+	s.putProduct(ctx, &product)
+
+	exists, err = s.ProductExists(ctx, id)
+	if exists == false {
+		return fmt.Errorf("Product creation failed")
+	}
+	return nil
 }
 
 // UpdateProduct allows updating a product's status, owner, description, and category
 func (s *SupplyChainContract) UpdateProduct(ctx contractapi.TransactionContextInterface, id string, newStatus string, newOwner string, newDescription string, newCategory string) error {
 	// Write your implementation here
+
+	exists, err := s.ProductExists(ctx, id)
+	if exists == false {
+		return fmt.Errorf("Product does not exist")
+	}
+
+	timestamp, err := s.getTimestamp(ctx)
+	if err != nil {
+		return err
+	}
+
+	product, err := s.QueryProduct(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	product.Status = newStatus
+	product.Owner = newOwner
+	product.Description = newDescription
+	product.Category = newCategory
+	product.UpdatedAt = timestamp
+
+	s.putProduct(ctx, product)
+
+	return nil
 }
 
 // TransferOwnership changes the owner of a product
