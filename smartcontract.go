@@ -3,6 +3,7 @@ package main // Package main, Do not change this line.
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
@@ -51,6 +52,7 @@ func (s *SupplyChainContract) InitLedger(ctx contractapi.TransactionContextInter
 		if err := s.putProduct(ctx, &product); err != nil {
 			return err
 		}
+		log.Printf("id: %s name: %s status: %s owner: %s createdAt: %s updatedAt %s description: %s category: %s", product.ID, product.Name, product.Status, product.Owner, product.CreatedAt, product.UpdatedAt, product.Description, product.Category)
 	}
 
 	return nil
@@ -60,8 +62,28 @@ func (s *SupplyChainContract) InitLedger(ctx contractapi.TransactionContextInter
 func (s *SupplyChainContract) CreateProduct(ctx contractapi.TransactionContextInterface, id, name, owner, description, category string) error {
 	// Write your implementation here
 	exists, err := s.ProductExists(ctx, id)
-	if exists == true {
-		return fmt.Errorf("Product already exists")
+	log.Printf("exists: %v", exists)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("Product %v already exists", id)
+	}
+
+	if id == "" {
+		return fmt.Errorf("Product id cannot be empty")
+	}
+	if name == "" {
+		return fmt.Errorf("Product name cannot be empty")
+	}
+	if owner == "" {
+		return fmt.Errorf("Product owner cannot be empty")
+	}
+	if description == "" {
+		return fmt.Errorf("Product description cannot be empty")
+	}
+	if category == "" {
+		return fmt.Errorf("Product category cannot be empty")
 	}
 
 	timestamp, err := s.getTimestamp(ctx)
@@ -69,43 +91,71 @@ func (s *SupplyChainContract) CreateProduct(ctx contractapi.TransactionContextIn
 		return err
 	}
 
-	product := Product{ID: id, Name: name, Status: "Manufactured", Owner: owner, CreatedAt: timestamp, UpdatedAt: timestamp, Category: category}
+	product := &Product{ID: id, Name: name, Status: "Manufactured", Owner: owner, CreatedAt: timestamp, UpdatedAt: timestamp, Description: description, Category: category}
 
-	s.putProduct(ctx, &product)
-
+	if err := s.putProduct(ctx, product); err != nil {
+		return fmt.Errorf("failed to put product: %v", err)
+	}
+	log.Printf("id: %s name: %s status: %s owner: %s createdAt: %s updatedAt %s description: %s category: %s", product.ID, product.Name, product.Status, product.Owner, product.CreatedAt, product.UpdatedAt, product.Description, product.Category)
 	exists, err = s.ProductExists(ctx, id)
-	if exists == false {
+	if err != nil {
+		return err
+	}
+	log.Printf("exists: %v", exists)
+	if !exists {
 		return fmt.Errorf("Product creation failed")
 	}
+	product, err = s.QueryProduct(ctx, id)
+	if err != nil {
+		return err
+	}
+	log.Printf("product: %v", product)
 	return nil
 }
 
 // UpdateProduct allows updating a product's status, owner, description, and category
 func (s *SupplyChainContract) UpdateProduct(ctx contractapi.TransactionContextInterface, id string, newStatus string, newOwner string, newDescription string, newCategory string) error {
 	// Write your implementation here
+	if id == "" {
+		return fmt.Errorf("Product id cannot be empty")
+	}
 
+	log.Printf("status: %s owner: %s description: %s category: %s", newStatus, newOwner, newDescription, newCategory)
 	exists, err := s.ProductExists(ctx, id)
-	if exists == false {
-		return fmt.Errorf("Product does not exist")
+	if !exists {
+		return fmt.Errorf("Product does not exist: %v", err)
+	}
+
+	product, err := s.QueryProduct(ctx, id)
+	log.Printf("error: %v", err)
+	if err != nil {
+		return err
+	}
+
+	if newStatus != "" {
+		product.Status = newStatus
+	}
+	if newOwner != "" {
+		product.Owner = newOwner
+	}
+	if newDescription != "" {
+		product.Description = newDescription
+	}
+	if newCategory != "" {
+		product.Category = newCategory
 	}
 
 	timestamp, err := s.getTimestamp(ctx)
 	if err != nil {
 		return err
 	}
-
-	product, err := s.QueryProduct(ctx, id)
-	if err != nil {
-		return err
-	}
-
-	product.Status = newStatus
-	product.Owner = newOwner
-	product.Description = newDescription
-	product.Category = newCategory
 	product.UpdatedAt = timestamp
 
-	s.putProduct(ctx, product)
+	err = s.putProduct(ctx, product)
+	log.Printf("error: %v", err)
+	if err := s.putProduct(ctx, product); err != nil {
+		return fmt.Errorf("failed to update product: %v", err)
+	}
 
 	return nil
 }
@@ -113,11 +163,51 @@ func (s *SupplyChainContract) UpdateProduct(ctx contractapi.TransactionContextIn
 // TransferOwnership changes the owner of a product
 func (s *SupplyChainContract) TransferOwnership(ctx contractapi.TransactionContextInterface, id, newOwner string) error {
 	// Write your implementation here
+	if id == "" {
+		return fmt.Errorf("Product id cannot be empty")
+	}
+	if newOwner == "" {
+		return fmt.Errorf("New owner cannot be empty")
+	}
+	exists, err := s.ProductExists(ctx, id)
+	if !exists {
+		return fmt.Errorf("Product does not exist: %v", err)
+	}
+	product, err := s.QueryProduct(ctx, id)
+	if err != nil {
+		return err
+	}
+	timestamp, err := s.getTimestamp(ctx)
+	if err != nil {
+		return err
+	}
+
+	product.Owner = newOwner
+	product.UpdatedAt = timestamp
+
+	s.putProduct(ctx, product)
+	return nil
 }
 
 // QueryProduct retrieves a single product from the ledger by ID
 func (s *SupplyChainContract) QueryProduct(ctx contractapi.TransactionContextInterface, id string) (*Product, error) {
 	// Write your implementation here
+	exists, err := s.ProductExists(ctx, id)
+	if !exists {
+		return nil, fmt.Errorf("Product does not exist: %v", err)
+	}
+
+	productJSON, err := ctx.GetStub().GetState(id)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to read from world state: %v", err)
+	}
+
+	var product Product
+	err = json.Unmarshal(productJSON, &product)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to unmarshal product: %v", err)
+	}
+	return &product, nil
 }
 
 // putProduct is a helper method for inserting or updating a product in the ledger
